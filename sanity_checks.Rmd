@@ -1,0 +1,381 @@
+---
+title: "Rice price project — data sanity checks"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 9, fig.height = 3.6, dpi = 110)
+suppressPackageStartupMessages({ library(dplyr); library(tidyr); library(ggplot2); library(readxl); library(knitr) })
+m  <- read.csv("data/interim/monthly.csv")            |> mutate(date = as.Date(date))
+r1 <- read.csv("data/interim/x1_monthly_releases.csv") |> mutate(date = as.Date(date))
+ca <- read.csv("data/interim/x1_annual_crop_avg.csv")
+x3y <- read.csv("data/interim/x3_niigata_august.csv")
+
+# reference palette (validated categorical slots 1-3) + recessive chrome
+pal <- c(blue = "#2a78d6", orange = "#eb6834", aqua = "#1baf7a")
+ink2 <- "#52514e"; muted <- "#898781"
+theme_set(theme_minimal(base_size = 11) +
+  theme(panel.grid.minor = element_blank(), panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(colour = "#e6e5e1", linewidth = 0.3),
+        axis.text = element_text(colour = muted), axis.title = element_text(colour = ink2),
+        plot.title = element_text(face = "bold", size = 11), plot.subtitle = element_text(colour = ink2, size = 9.5),
+        legend.position = "top", legend.justification = "left", legend.title = element_blank(),
+        plot.background = element_rect(fill = "#fcfcfb", colour = NA)))
+dlog <- function(x) c(NA, diff(log(x)))
+status <- list()   # collects the go/revise checklist as we go
+add <- function(check, result, detail) status[[length(status) + 1]] <<- data.frame(Check = check, Result = result, Detail = detail)
+```
+
+# Decisions taken after these checks (2026-11-13)
+
+| Decision | Choice | Why (section) |
+|---|---|---|
+| Sample window | **Sep 2010 → latest, for all models** | Monthly X1 doesn't exist before then (3); one window keeps the models comparable |
+| Intervention dummies | Shortage regime from Aug 2024 only. **No Jan 2007 / Jan 2012 dummies** | Item 1001 had no spec revision then (2.1) |
+| Evaluation | Last-12-month holdout **plus** rolling-window ASE: 96-month training window, step 1, h = 3 and 12, split by origin before/after Aug 2024 | The holdout sits entirely inside the turn (7.3). A 96-month window gives 72 pre-break origins at each horizon |
+| Weather | Add **Niigata Jun–Aug precipitation, % of the 1991–2020 normal** (X3b). Anomalies use JMA's official normals | Aug 2023 was both the hottest and the driest August (5, 5b) |
+| Latest X1 month | Re-pull MAFF when the Oct 2026 release appears, before modelling | Sep 2026 is thin and preliminary (3.4) |
+
+The model-ready data that implements these decisions is `data/processed/model_data.csv` with `splits.rds` (built by `R/20_prepare_model_data.R`).
+
+This report checks the raw data against the assumptions in `spec.md` before any EDA or modelling. Raw files are in `data/raw/` (see `data/README.md`). The parsed and joined table is `data/interim/monthly.csv`, which is **tax-inclusive and untransformed**. Each section ends with a pass, flag or fail result, and the [summary](#summary) gathers them into a go/revise call.
+
+# 1. Coverage
+
+```{r coverage}
+series <- c(y = "Y retail 5kg", x1 = "X1 wholesale", x2_all = "X2 import px", x3 = "X3 Aug anomaly", x4 = "X4 visitors")
+cov <- m |> select(date, all_of(names(series))) |> pivot_longer(-date) |>
+  mutate(present = !is.na(value), name = factor(series[name], rev(series)))
+ggplot(cov |> filter(present), aes(date, name)) +
+  geom_tile(fill = pal["blue"], height = 0.55) +
+  geom_vline(xintercept = as.Date(c("2008-09-01", "2010-09-01")), colour = muted, linetype = 3) +
+  labs(x = NULL, y = NULL, title = "Which months each series covers",
+       subtitle = "Dotted lines: X1 starts Sep 2008, then has a 12-month hole until Sep 2010")
+cov |> group_by(Series = name) |>
+  summarise(First = format(min(date[present]), "%Y-%m"), Last = format(max(date[present]), "%Y-%m"),
+            Months = sum(present),
+            `Gaps inside span` = sum(!present & date > min(date[present]) & date < max(date[present]))) |>
+  arrange(desc(Series)) |> kable()
+common <- m |> filter(!is.na(y), !is.na(x1), !is.na(x2_all), !is.na(x3))
+cont   <- m |> filter(date >= as.Date("2010-09-01"))
+```
+
+**Common window (Y, X1, X2 and X3 all present): `r nrow(common)` months.** The longest continuous run is **Sep 2010 → `r format(max(m$date), "%b %Y")` (`r nrow(cont)` months)**. The spec expected about 320. This is driven entirely by X1 (section 3).
+
+# 2. Y — retail price, item 1001, Tokyo ku-area
+
+## 2.1 Specification history for item 1001
+
+```{r spec-history}
+f <- "data/raw/estat/shinkyu_meigara_2001_2026.xlsx"
+hist <- bind_rows(lapply(excel_sheets(f), function(sh) {
+  d <- as.data.frame(read_excel(f, sheet = sh, col_names = FALSE, .name_repair = "minimal"))
+  d[] <- lapply(d, function(x) gsub("[\r\n]+", " ", as.character(x)))
+  h <- d[grepl("^\\s*1001\\s*$", d[[1]]), , drop = FALSE]
+  if (!nrow(h)) return(NULL)
+  data.frame(Year = trimws(sh), `New spec` = h[[3]], `Old spec` = h[[4]], Unit = h[[5]], Month = h[[6]], check.names = FALSE)
+}))
+kable(hist)
+```
+
+The Statistics Bureau's old-vs-new specification tables cover 2001–2026 and list **only two revisions** to item 1001:
+
+* **January 2002: the unit changed from 10 kg to a 5 kg bag.** e-Stat publishes 2000–2001 **per 10 kg** with no note. `10_parse_join.R` halves those 24 values and sets the flag `unit_10kg`. The window starts after 2002 anyway (see X1), so this only matters for the sensitivity fit.
+* **November 2009: wording only** (単一品種 → 単一原料米, a labelling-law change). The table below checks for a level shift.
+* **No revision in January 2007, January 2012 or January 2026** for this item. The spec's dummies for 2007 and 2012 have no documented basis for item 1001. The January 2026 notice changed only the table layout.
+
+```{r y-raw}
+ggplot(m, aes(date)) +
+  geom_line(aes(y = y_raw, colour = "As published by e-Stat"), linewidth = 0.6) +
+  geom_line(aes(y = y, colour = "Per-5kg basis (2000–01 halved)"), linewidth = 0.6) +
+  scale_colour_manual(values = unname(pal[c("orange", "blue")])) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = NULL, y = "¥ per bag", title = "Y: the 2000–01 values are per 10 kg",
+       subtitle = "Without the fix, January 2002 shows a fake −51% crash")
+around <- function(d, k = 2) m |> mutate(dl = dlog(y)) |> filter(abs(as.numeric(date - as.Date(d))) <= 31 * k) |>
+  transmute(Month = format(date, "%Y-%m"), `Y (¥)` = y, `Δlog Y` = round(dl, 3))
+kable(around("2009-11-01"), caption = "Around the Nov 2009 wording change")
+```
+
+## 2.2 Integrity and level anchors
+
+```{r y-integrity}
+yy <- m |> mutate(dl = dlog(y))
+sd_pre <- sd(yy$dl[yy$date >= as.Date("2002-02-01") & yy$date < as.Date("2024-08-01")], na.rm = TRUE)
+anch <- yy |> filter(format(date, "%m") == "06", date >= as.Date("2002-01-01")) |>
+  transmute(Year = format(date, "%Y"), `June Y (¥/5kg)` = y)
+big <- yy |> filter(abs(dl) > 0.05, date != as.Date("2002-01-01")) |>
+  transmute(Month = format(date, "%Y-%m"), `Y (¥)` = y, `Δlog Y` = round(dl, 3))
+add("Y coverage", ifelse(sum(is.na(m$y)) == 0, "PASS", "FAIL"),
+    sprintf("%d months, Jan 2000–%s, no gaps, no '-'/'...' placeholders", sum(!is.na(m$y)), format(max(m$date), "%b %Y")))
+add("Y item continuity", "FLAG", "Unit was 10 kg before Jan 2002 (fixed and flagged); Nov 2009 wording only; no revisions in 2007/2012/2026")
+```
+
+* `r sum(!is.na(m$y))` months with no gaps. The table's `-` and `...` placeholders never appear for this item.
+* Before the break (Feb 2002 – Jul 2024), the monthly sd of Δlog Y is **`r round(sd_pre, 3)`**. Moves larger than 5% are listed below. 2003–04 is the 2003 cold-summer crop failure, which is a real event. Everything from August 2024 on is the shortage.
+
+```{r y-big}
+kable(big, caption = "Months with |Δlog Y| > 5% (excluding the Jan 2002 unit change)")
+```
+
+```{r y-anchors, fig.height=3}
+ggplot(anch, aes(as.integer(Year), `June Y (¥/5kg)`)) + geom_line(colour = pal["blue"], linewidth = 0.6) +
+  geom_point(colour = pal["blue"], size = 1.6) + scale_y_continuous(labels = scales::comma, limits = c(0, NA)) +
+  labs(x = NULL, y = "¥ per 5 kg", title = "Level anchor: June price each year",
+       subtitle = "¥2,000–2,700 plateau before 2024; about doubled by 2025")
+```
+
+## 2.3 Consumption tax
+
+```{r tax}
+tx <- yy |> filter(format(date, "%Y-%m") %in% c("2014-04", "2019-10")) |>
+  transmute(Month = format(date, "%Y-%m"), `Δlog Y` = round(dl, 4),
+            `Expected from tax` = c(round(log(1.08 / 1.05), 4), 0),
+            `z vs pre-break sd` = round(dl / sd_pre, 2))
+kable(tx)
+ytx <- yy |> mutate(y_ex = y / ifelse(date < as.Date("2014-04-01"), 1.05, 1.08), dl_ex = dlog(y_ex))
+add("Tax steps in Y", "PASS",
+    sprintf("Apr 2014 Δlog = %.3f vs %.3f expected; Oct 2019 shows no step. Tax-exclusive Δlog in Apr 2014 = %.3f",
+            tx$`Δlog Y`[1], log(1.08 / 1.05), ytx$dl_ex[ytx$date == as.Date("2014-04-01")]))
+```
+
+April 2014 shows the expected step, with some pass-through slippage, and October 2019 has none. After dividing by 1.05/1.08, the April 2014 change is `r round(ytx$dl_ex[ytx$date == as.Date("2014-04-01")], 3)`, which is within normal noise. **The spec's tax treatment works for Y.**
+
+# 3. X1 — MAFF relative trading price, all-brand average
+
+## 3.1 How far back it goes (the main finding)
+
+```{r x1-coverage}
+kable(ca |> mutate(`Monthly file available` = crop_year %in% unique(m$crop_year[!is.na(m$x1)])) |>
+        transmute(`Crop year` = crop_year, `Crop-year average (¥/60kg)` = x1_crop_avg, `Monthly file available`),
+      caption = "Crop-year averages exist from the 2006 crop. Monthly series exist only where marked TRUE (2025 crop from monthly releases; 2026 crop = Sep 2026 only)")
+add("X1 history", "FAIL",
+    "The 相対取引価格 series starts with the 2006 crop, not 1990. Monthly files exist for the 2008 crop and 2010 on; 2006, 2007 and 2009 crops have annual averages only (not on MAFF's site or in web archives)")
+```
+
+* The spec says X1 is "comparable from the 1990 crop". **That's wrong.** The 相対取引価格 system began with the **2006 crop** (平成18年産). Earlier prices came from the 自主流通米 auction, a different market and a different series.
+* Even from 2006 on, **monthly** data is published only for the **2008 crop** and the **2010 crop onward**. For the 2006, 2007 and 2009 crops, MAFF's site has only crop-year averages, and neither the NDL WARP archive nor the Wayback Machine has the monthly files.
+* So **monthly X1 runs continuously from September 2010**: `r nrow(cont)` months. Stretching to Sep 2008 would mean filling a 12-month hole, or using the 2009 crop's annual average as a flat value, which is risky for a VAR.
+
+## 3.2 Tax basis, stitching, consistency
+
+```{r x1-consistency}
+cmp <- inner_join(m |> filter(x1_src == "crop_year_file") |> select(date, x1), r1 |> select(date, x1_release), by = "date")
+add("X1 tax basis", "PASS", "File headers state 円／玄米60㎏税込 (tax-inclusive): the spec's divide-by-1.05/1.08 applies")
+add("X1 file vs monthly-release agreement", ifelse(all(cmp$x1 == cmp$x1_release), "PASS", "FLAG"),
+    sprintf("%d overlapping months, max |diff| = %g", nrow(cmp), max(abs(cmp$x1 - cmp$x1_release))))
+```
+
+* **Tax:** every file header says *円／玄米60㎏税込*, so the spec's divide-by-1.05/1.08 applies. Caveat: MAFF's figures are based on contract prices including tax. The 2014 rate change lands at the September 2014 crop switch, which is mixed in with a −9% supply-driven fall, so it can't be checked from the data.
+* **Two sources agree:** the crop-year files and the separate monthly releases give identical values for all `r nrow(cmp)` overlapping months (max difference `r max(abs(cmp$x1 - cmp$x1_release))`).
+* **No overlap to stitch:** each calendar month belongs to exactly one crop year (Sep–Aug), so the "current crop" rule is automatic. The real issue is the next point.
+
+## 3.3 X1 is close to a step function
+
+```{r x1-steps}
+x1d <- m |> filter(date >= as.Date("2010-09-01")) |> mutate(dl = dlog(x1), sep = format(date, "%m") == "09")
+share_sep <- with(x1d, sum(abs(dl[sep]), na.rm = TRUE) / sum(abs(dl), na.rm = TRUE))
+ggplot(m |> filter(!is.na(x1)), aes(date, x1)) +
+  geom_step(colour = pal["orange"], linewidth = 0.6) +
+  geom_point(data = ~ filter(.x, format(date, "%m") == "09"), colour = pal["orange"], size = 1.5) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = NULL, y = "¥ per 60 kg brown rice", title = "X1 jumps when the new crop arrives each September (dots), then barely moves",
+       subtitle = "Gap Sep 2009 – Aug 2010 = missing 2009-crop monthly file")
+add("X1 within-year variation", "FLAG",
+    sprintf("%.0f%% of total |Δlog X1| since Sep 2010 happens in September; Δlog X1 is a once-a-year spike series", 100 * share_sep))
+```
+
+**`r round(100 * share_sep)`% of all absolute monthly change in X1 since 2010 happens in September**, when the new crop's prices replace the old crop's. September is 1 month in 12. Within a crop year X1 drifts slowly: `r round(100*mean(abs(x1d$dl) < 0.01, na.rm=TRUE))`% of months move by less than 1%. For modelling:
+
+* Δlog X1 is mostly zeros with one spike per year. It will show a spike at lag 12 in its own ACF, and it makes CCFs and Granger tests depend heavily on about 15 September values.
+* Retail prices adjust more smoothly. Expect the "wholesale leads retail by 1–3 months" story to show up mainly as **September spikes in X1 followed by retail moves in Oct–Dec**.
+
+## 3.4 New-crop volume (thin-month check)
+
+```{r x1-volume}
+vol <- r1 |> filter(format(date, "%m") %in% c("09", "10")) |> transmute(Month = format(date, "%Y-%m"), `Crop year` = as.character(crop_year),
+                                                                          `Price (¥/60kg)` = x1_release, `Volume (t)` = volume_t)
+kable(vol, format.args = list(big.mark = ","))
+sep26 <- r1 |> filter(date == as.Date("2026-09-01"))
+x1_drop <- 100 * (m$x1[m$date == as.Date("2026-09-01")] / m$x1[m$date == as.Date("2026-08-01")] - 1)  # % change, not log
+add("Latest X1 month (Sep 2026)", "FLAG",
+    sprintf("New 2026 crop opens at ¥%s (%.1f%% vs Aug) on only %s t, about a third of earlier Septembers: preliminary and thin",
+            format(sep26$x1_release, big.mark = ","), x1_drop, format(sep26$volume_t, big.mark = ",")))
+```
+
+Volumes are published only in the monthly releases (from the 2022 crop). **September 2026, the latest month, prices the new crop at ¥`r format(sep26$x1_release, big.mark=",")`, down `r abs(round(x1_drop, 1))`% from August, on `r format(sep26$volume_t, big.mark=",")` t.** That's about a third of earlier Septembers. It's a 速報 (preliminary) value from a thin month, and it will be revised. It's also the single most informative data point for the client's question, so treat it carefully: flag it, and check the forecast's sensitivity to it.
+
+# 4. X2 — BOJ import price index (yen basis)
+
+```{r x2, fig.height=3}
+z <- m |> filter(!is.na(x2_all_2015base)) |> mutate(ratio = x2_all / x2_all_2015base)
+ggplot(m |> filter(!is.na(x2_all)) |> select(date, `All commodities` = x2_all, `Petroleum, coal & natural gas` = x2_energy) |>
+         pivot_longer(-date), aes(date, value, colour = name)) +
+  geom_line(linewidth = 0.6) + scale_colour_manual(values = unname(pal[c("blue", "aqua")])) +
+  labs(x = NULL, y = "Index, CY2020 = 100", title = "X2: import prices, yen basis",
+       subtitle = "2022 spike = energy prices plus yen weakness")
+add("X2 coverage & rebasing", ifelse(sd(z$ratio) < 0.01, "PASS", "FLAG"),
+    sprintf("Jan 2000–%s, no gaps; ratio of 2020-base to 2015-base series is %.3f ± %.4f, so the history is cleanly linked",
+            format(max(m$date[!is.na(m$x2_all)]), "%b %Y"), mean(z$ratio), sd(z$ratio)))
+```
+
+The BOJ's 2020-base series (`PRCG20_2600000000`) is linked back to 1960. Where it overlaps the old 2015-base series, the ratio is `r round(mean(z$ratio),3)` ± `r round(sd(z$ratio),4)`, so there are no rebasing jumps. The units are yen basis, not contract currency (series code `…26…`). The energy subgroup (`PRCG20_2600520001`) is also kept as an alternative X2.
+
+# 5. X3 — Niigata August temperature anomaly
+
+```{r x3, fig.height=3}
+x3w <- x3y |> filter(year >= 1991)
+rank23 <- rank(-x3y$aug_temp)[x3y$year == 2023]
+ggplot(x3w, aes(year, aug_anom)) +
+  geom_col(fill = ifelse(x3w$aug_anom >= 0, pal["orange"], pal["blue"]), width = 0.7) +
+  geom_hline(yintercept = 0, colour = muted) +
+  labs(x = NULL, y = "°C vs 1991–2020", title = "X3: August mean temperature anomaly at Niigata",
+       subtitle = "2023 is the hottest August on record")
+flags <- x3y |> filter(year >= 1991, aug_flag != "")
+add("X3 plausibility", "PASS",
+    sprintf("Aug 2023 = %.1f °C (rank %d of %d years since 1881). Our 1991–2020 normal %.2f vs JMA's %.1f (diff %.2f); anomalies now use JMA's. No quality flags on August values since 1991",
+            x3y$aug_temp[x3y$year == 2023], rank23, sum(!is.na(x3y$aug_temp)), x3y$our_normal[1], x3y$jma_normal[1],
+            x3y$our_normal[1] - x3y$jma_normal[1]))
+```
+
+* August 2023 was `r x3y$aug_temp[x3y$year==2023]` °C, the hottest August since records began in 1881 (anomaly +`r round(x3y$aug_anom[x3y$year==2023],1)` °C). That matches the white paper's heat-damage story.
+* Our 1991–2020 mean (`r round(x3y$our_normal[1],2)` °C) differs from JMA's official normal (`r x3y$jma_normal[1]` °C) by `r round(x3y$our_normal[1]-x3y$jma_normal[1],2)` °C. JMA's normals include homogenisation adjustments. **Anomalies use JMA's normal**, so they match what JMA publishes.
+* There are no quality markers (`)` or `]`) on any August value since 1991. Only the in-progress 2026 annual value carries one.
+* X3 has only about 26 distinct values, one per crop year, each held for 12 months. It's an exogenous level-shift regressor, not a time series with dynamics.
+
+# 5b. X3b — Niigata Jun–Aug precipitation
+
+```{r x3b, fig.height=3}
+pb <- read.csv("data/interim/x3b_niigata_jja_precip.csv")
+pbw <- pb |> filter(year >= 2010)
+both <- inner_join(pb, x3y, by = "year") |> filter(year >= 2010)
+r_tp <- cor(both$jja_pct, both$aug_anom)
+ggplot(pbw, aes(year, jja_pct - 100)) +
+  geom_col(fill = ifelse(pbw$jja_pct >= 100, pal["blue"], pal["orange"]), width = 0.7) +
+  geom_hline(yintercept = 0, colour = muted) +
+  scale_y_continuous(labels = function(v) paste0(v + 100, "%")) +
+  labs(x = NULL, y = "% of 1991–2020 normal", title = "X3b: Jun–Aug precipitation at Niigata, % of normal",
+       subtitle = "Crop years in the model window (2010 on). Bars start at 100%")
+dry <- pbw |> arrange(jja_pct) |> head(3); wet <- pbw |> arrange(desc(jja_pct)) |> head(3)
+add("X3b precipitation", "PASS",
+    sprintf("%d complete summers 1991–2026, no quality flags. JJA normal: ours %.1f mm vs JMA %.1f mm. Correlation with the Aug temperature anomaly since 2010: %.2f",
+            nrow(pb), pb$jja_normal_own[1], pb$jja_normal_jma[1], r_tp))
+```
+
+* All `r nrow(pb)` summers since 1991 are complete, with no JMA quality markers. Our 1991–2020 Jun–Aug mean (`r round(pb$jja_normal_own[1],1)` mm) matches JMA's official normal (`r pb$jja_normal_jma[1]` mm), and the % of normal uses JMA's.
+* Driest summers in the window: `r paste0(dry$year, " (", round(dry$jja_pct), "%)", collapse = ", ")`. Wettest: `r paste0(wet$year, " (", round(wet$jja_pct), "%)", collapse = ", ")`.
+* **2023 was `r round(pb$jja_pct[pb$year==2023])`% of normal for the season, but August 2023 alone had just 2.0 mm of rain** (normal 163.4 mm), during the hottest August on record. A wet June (182.5 mm, 151% of normal) and a slightly dry July (172.5 mm, 78%) hide that in the three-month total. Keep this in mind if precipitation looks weak in the VAR: an August-only measure would capture the 2023 drought more sharply.
+* Correlation with the temperature anomaly across the `r nrow(both)` crop years since 2010 is **`r round(r_tp, 2)`**: hot summers tend to be dry, but not enough to cause collinearity problems. Like X3, X3b has one value per crop year, so it's an exogenous step regressor with `r nrow(both)` distinct values in the window (crop years 2010–2026).
+
+# 6. X4 — JNTO visitor arrivals
+
+```{r x4, fig.height=3}
+ggplot(m |> filter(!is.na(x4)), aes(date, x4 / 1e6)) + geom_line(colour = pal["blue"], linewidth = 0.6) +
+  labs(x = NULL, y = "Million visitors / month", title = "X4: monthly foreign visitor arrivals",
+       subtitle = "Monthly file starts Jan 2003; collapse from Apr 2020 to Sep 2022")
+add("X4 coverage", "FLAG", "Monthly data from Jan 2003 (not 2000). Covers the X1 window fully. Near-zero 2020–22. Recent months are JNTO estimates (推計値) and get revised")
+```
+
+The monthly JNTO file starts in **2003**, not 2000. That doesn't matter, because the window starts in 2010 anyway. The 2020–22 collapse is there as expected. The latest months are JNTO estimates (推計値) and will be revised.
+
+# 7. Cross-series checks (EDA preview)
+
+## 7.1 Do retail and wholesale move together?
+
+```{r overlay}
+ov <- m |> filter(date >= as.Date("2008-09-01")) |>
+  mutate(y_ex = y / ifelse(date < as.Date("2014-04-01"), 1.05, 1.08),
+         x1_ex = x1 / ifelse(date < as.Date("2014-04-01"), 1.05, 1.08))
+base <- ov |> filter(date >= as.Date("2010-09-01"), date <= as.Date("2011-08-01")) |>
+  summarise(y = mean(y_ex), x1 = mean(x1_ex, na.rm = TRUE))
+ovl <- ov |> transmute(date, `Y retail` = 100 * y_ex / base$y, `X1 wholesale` = 100 * x1_ex / base$x1) |> pivot_longer(-date)
+p <- ggplot(ovl, aes(date, value, colour = name)) + geom_line(linewidth = 0.6, na.rm = TRUE) +
+  scale_colour_manual(values = c(`Y retail` = unname(pal["blue"]), `X1 wholesale` = unname(pal["orange"]))) +
+  scale_y_log10() + labs(x = NULL, y = "Index, 2010 crop year = 100 (log scale)")
+p + labs(title = "Tax-exclusive retail vs wholesale, indexed to a common base",
+         subtitle = "Same log axis, so equal vertical distance = equal % change")
+p + coord_cartesian(xlim = as.Date(c("2023-01-01", "2026-09-30"))) +
+  labs(title = "Zoom: 2023–2026", subtitle = "Wholesale jumps in Sep 2024 and Sep 2025; retail climbs over the following months")
+```
+
+```{r margin, fig.height=3}
+# 60 kg brown rice -> ~54 kg milled at a 0.9 milling yield; compare per kg
+mg <- ov |> mutate(retail_per_kg = y_ex / 5, wholesale_per_kg = x1_ex / (60 * 0.9), ratio = retail_per_kg / wholesale_per_kg)
+pre_ratio <- mg |> filter(date >= as.Date("2010-09-01"), date < as.Date("2024-08-01")) |> pull(ratio)
+ggplot(mg |> filter(!is.na(ratio)), aes(date, ratio)) + geom_line(colour = pal["aqua"], linewidth = 0.6) +
+  geom_hline(yintercept = mean(pre_ratio), colour = muted, linetype = 3) +
+  labs(x = NULL, y = "Retail ÷ wholesale (per kg milled)", title = "Implied retail mark-up over wholesale",
+       subtitle = "Dotted = pre-break mean. Dips each September when the new crop reprices wholesale; Sep 2026 spikes up")
+```
+
+* Before the break the mark-up ratio averaged **`r round(mean(pre_ratio),2)`** (sd `r round(sd(pre_ratio),2)`). Retail and wholesale share a long-run level, which hints at cointegration. That's the spec's VECM caveat, and it now looks more relevant than a footnote.
+* Each September's wholesale jump **squeezes the mark-up** (Sep 2024: `r round(mg$ratio[mg$date==as.Date("2024-09-01")],2)`; Sep 2025: `r round(mg$ratio[mg$date==as.Date("2025-09-01")],2)`). Retail then catches up over the following months, which is the lead/lag pattern a VAR or VECM should pick up. Through the 2025 crop year the mark-up stayed below its pre-break mean, at about 1.6.
+* **September 2026 flips this.** Wholesale falls `r abs(round(x1_drop, 1))`%, and the mark-up jumps to **`r round(tail(mg$ratio,1),2)`**, above the pre-break mean and near the top of its pre-break range (`r paste(round(range(pre_ratio),2), collapse="–")`). If the old relationship holds, **retail has room to keep falling**. That's the key fact for the client, though it rests on one thin preliminary month (section 3.4).
+
+## 7.2 Lead/lag: cross-correlations
+
+```{r ccf, fig.height=3.2}
+cc <- m |> filter(date >= as.Date("2010-10-01")) |>
+  mutate(dy = dlog(y / ifelse(date < as.Date("2014-04-01"), 1.05, 1.08)),
+         dx1 = dlog(x1 / ifelse(date < as.Date("2014-04-01"), 1.05, 1.08)), dx2 = dlog(x2_all)) |> filter(!is.na(dy))
+ccdf <- function(x, lab, d) { k <- ccf(d[[x]], d$dy, lag.max = 6, plot = FALSE, na.action = na.pass)
+  data.frame(lag = -k$lag[, 1, 1], r = k$acf[, 1, 1], series = lab, n = sum(complete.cases(d[[x]], d$dy))) }
+pre <- cc |> filter(date < as.Date("2024-08-01"))
+cdat <- bind_rows(ccdf("dx1", "ΔX1, all months", cc), ccdf("dx1", "ΔX1, pre-Aug 2024", pre),
+                  ccdf("dx2", "ΔX2, all months", cc), ccdf("dx2", "ΔX2, pre-Aug 2024", pre))
+ci <- 2 / sqrt(nrow(cc)); ci_pre <- 2 / sqrt(nrow(pre))
+ggplot(cdat, aes(lag, r)) + geom_hline(yintercept = 0, colour = muted) +
+  geom_hline(aes(yintercept = 2 / sqrt(n)), linetype = 3, colour = muted) +
+  geom_hline(aes(yintercept = -2 / sqrt(n)), linetype = 3, colour = muted) +
+  geom_segment(aes(xend = lag, yend = 0), colour = pal["blue"], linewidth = 0.8) + geom_point(colour = pal["blue"], size = 1.6) +
+  facet_wrap(~series, nrow = 1) + scale_x_continuous(breaks = seq(-6, 6, 3)) +
+  labs(x = "Lag k (positive = X leads Y by k months)", y = "cor(ΔX[t−k], ΔY[t])",
+       title = "Cross-correlation of tax-exclusive Δlog Y with Δlog X1 and Δlog X2",
+       subtitle = "Dotted lines = ±2/√n")
+top <- cdat |> group_by(series) |> slice_max(abs(r), n = 2) |> mutate(r = round(r, 2)) |> select(series, lag, r)
+kable(top, caption = "Two largest |r| per panel")
+x1lead <- cdat |> filter(series == "ΔX1, pre-Aug 2024", lag %in% 1:3) |> arrange(lag)
+add("X1 leads Y?", ifelse(any(abs(x1lead$r) > ci_pre), "PASS", "FLAG"),
+    sprintf("Pre-break CCF at lags 1–3: %s (±%.2f band). Full-sample CCF is dominated by 2024–25", paste(round(x1lead$r, 2), collapse = ", "), ci_pre))
+x2lead <- cdat |> filter(series == "ΔX2, pre-Aug 2024", lag %in% 1:6)
+add("X2 leads Y?", ifelse(any(abs(x2lead$r) > ci_pre), "PASS", "FLAG"),
+    sprintf("Pre-break max |r| at lags 1–6 = %.2f (±%.2f band)", max(abs(x2lead$r)), ci_pre))
+```
+
+## 7.3 Post-break sample and the holdout
+
+```{r break}
+post <- m |> filter(date >= as.Date("2024-08-01"))
+add("Post-break sample", "FLAG",
+    sprintf("%d months since Aug 2024. The 12-month holdout (Oct 2025–Sep 2026) lies wholly inside the shortage regime and includes the start of the decline", nrow(post)))
+```
+
+* There are **`r nrow(post)` months** of post-break data (Aug 2024 → `r format(max(m$date), "%b %Y")`). A shortage dummy fitted on about 26 months leaves little room for dynamics.
+* The 12-month holdout (Oct 2025 – Sep 2026) is **entirely post-break** and includes the turn: retail peaked around ¥`r format(max(post$y), big.mark=",")` and is now ¥`r format(tail(m$y, 1), big.mark=",")`. Holdout ASE will mostly measure who caught the turn, so the spec's pre/post split of rolling ASE is essential, not optional.
+
+# Summary — go / revise {#summary}
+
+```{r summary}
+st <- bind_rows(status)
+kable(st, align = "lll")
+```
+
+## Recommendation: **revise the plan in a few targeted ways, then go**
+
+The data supports the project's core: a clean Y, a strong wholesale lead indicator, and a visible turning point that matters to the client. Four spec assumptions were wrong or fragile. Each has been resolved as follows:
+
+| # | Issue | Resolution (2026-11-13) | Status |
+|---|---|---|---|
+| 1 | Monthly X1 only exists from Sep 2010 | **Sep 2010 → latest for all models** (`r nrow(cont)` months), applied in `R/20_prepare_model_data.R`. The pre-break sensitivity fit is Sep 2010 – Jul 2024 | Resolved |
+| 2 | Jan 2007 / Jan 2012 dummies have no basis for item 1001 | Dropped. Only the shortage dummy (Aug 2024 on) is kept. The Jan 2002 unit change falls outside the window | Resolved |
+| 3 | X1 is a crop-year step series | `sep` indicator added to the model data. The VECM is a parallel check to cointegration in the EDA | Carry into EDA |
+| 4 | Sep 2026 X1 is thin and preliminary | Flagged (`x1_thin`, `x1_prelim`). The October release wasn't out on 2026-11-13: re-run `R/02` → `R/10` → `R/20` when it appears | **Open** |
+
+Also added: Niigata Jun–Aug precipitation (X3b, section 5b), and rolling-window evaluation with a 96-month training window alongside the 12-month holdout.
+
+Unchanged: tax-exclusive modelling (the April 2014 step behaves as expected for Y; X1 is tax-inclusive per MAFF), X2 (clean), X3 (clean, exogenous), and X4 (optional; covers the window).

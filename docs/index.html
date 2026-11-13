@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tokyo Rice Prices</title>
+  <meta name="description" content="Retail and wholesale rice prices in Tokyo, 2010–2026: what drove the 2024–25 spike, and whether to lock in a 12-month supply contract.">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.16/dist/plot.umd.min.js"></script>
+</head>
+<body>
+  <header class="wrap top">
+    <div>
+      <h1>Tokyo Rice Prices</h1>
+      <p class="lede">Should a Tokyo restaurant group lock in a 12-month rice contract now, or keep buying at spot?</p>
+      <p class="meta" id="meta">Loading data…</p>
+    </div>
+    <button id="theme" class="ghost" type="button" aria-label="Toggle light or dark theme">◐ Theme</button>
+  </header>
+
+  <main class="wrap">
+    <section class="tiles" id="tiles" aria-label="Headline figures"></section>
+
+    <section id="s1">
+      <h2><span class="num">1</span> The price story</h2>
+      <p class="intro">Retail price of a 5 kg bag of Koshihikari in Tokyo's 23 wards. Prices sat near ¥2,000–2,500 for over a decade, almost doubled within a year from August 2024, and have been falling since late 2025.</p>
+      <div class="card">
+        <div class="controls">
+          <div class="seg" role="group" aria-label="Time range">
+            <button type="button" data-range="all" aria-pressed="true">Since 2010</button>
+            <button type="button" data-range="2023" aria-pressed="false">Since 2023</button>
+          </div>
+          <div class="seg" role="group" aria-label="Price basis">
+            <button type="button" data-tax="incl" aria-pressed="true">With tax</button>
+            <button type="button" data-tax="excl" aria-pressed="false">Without tax</button>
+          </div>
+        </div>
+        <figure>
+          <figcaption><b>Retail price, ¥ per 5 kg bag</b> <span class="sub">Shaded: shortage period from Aug 2024. Numbered dots mark the events listed below.</span></figcaption>
+          <div class="chart" id="c-price"></div>
+          <ol class="events" id="events"></ol>
+        </figure>
+        <button class="tbl-toggle" type="button" data-for="c-price">View as table</button>
+        <div class="tbl" id="t-c-price" hidden></div>
+      </div>
+    </section>
+
+    <section id="s2">
+      <h2><span class="num">2</span> Wholesale leads retail</h2>
+      <p class="intro">The wholesale price that collectors such as JA receive is repriced each September when the new crop arrives. Retail follows over the next months. The gap between the two, the retailer's mark-up, is the best early signal of where shelf prices go next.</p>
+      <div class="card">
+        <figure>
+          <figcaption><b>Retail vs wholesale, indexed (2010 crop year = 100, log scale)</b> <span class="sub">Tax-exclusive. Equal vertical distance means equal % change.</span></figcaption>
+          <div class="legend" id="lg-idx"></div>
+          <div class="chart" id="c-index"></div>
+        </figure>
+        <button class="tbl-toggle" type="button" data-for="c-index">View as table</button>
+        <div class="tbl" id="t-c-index" hidden></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <figure>
+            <figcaption><b>Retail mark-up over wholesale</b> <span class="sub" id="markup-sub"></span></figcaption>
+            <div class="chart" id="c-markup"></div>
+          </figure>
+          <button class="tbl-toggle" type="button" data-for="c-markup">View as table</button>
+          <div class="tbl" id="t-c-markup" hidden></div>
+        </div>
+        <div class="card">
+          <div class="controls">
+            <div class="seg" role="group" aria-label="Sample period">
+              <button type="button" data-ccf="pre" aria-pressed="true">Before Aug 2024</button>
+              <button type="button" data-ccf="all" aria-pressed="false">All months</button>
+            </div>
+          </div>
+          <figure>
+            <figcaption><b>Does wholesale lead retail?</b> <span class="sub">Correlation of monthly % changes. Positive lag k = wholesale k months earlier. Dotted = significance band.</span></figcaption>
+            <div class="chart" id="c-ccf"></div>
+            <p class="takeaway" id="ccf-take"></p>
+          </figure>
+          <button class="tbl-toggle" type="button" data-for="c-ccf">View as table</button>
+          <div class="tbl" id="t-c-ccf" hidden></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="s3">
+      <h2><span class="num">3</span> What drove the spike</h2>
+      <p class="intro">Rice in Japan is almost all grown at home, so the spike came from the domestic harvest and stockpiles rather than world markets. The 2023 summer in Niigata, Japan's top Koshihikari region, was the hottest on record and nearly rainless in August, which hurt milling quality and drew down stocks.</p>
+      <div class="grid2">
+        <div class="card">
+          <figure>
+            <figcaption><b>August temperature at Niigata, °C vs normal</b> <span class="sub">By crop year. Orange = hotter than normal.</span></figcaption>
+            <div class="chart" id="c-temp"></div>
+          </figure>
+          <button class="tbl-toggle" type="button" data-for="c-temp">View as table</button>
+          <div class="tbl" id="t-c-temp" hidden></div>
+        </div>
+        <div class="card">
+          <figure>
+            <figcaption><b>June–August rain at Niigata, % of normal</b> <span class="sub">By crop year. Orange = drier than normal.</span></figcaption>
+            <div class="chart" id="c-rain"></div>
+          </figure>
+          <button class="tbl-toggle" type="button" data-for="c-rain">View as table</button>
+          <div class="tbl" id="t-c-rain" hidden></div>
+        </div>
+      </div>
+      <div class="card">
+        <figure>
+          <figcaption><b>Not the weak yen: year-on-year % change</b> <span class="sub">Import prices in yen already include the exchange rate and oil. They spiked in 2022 with no effect on rice; rice spiked in 2024–25 while import prices were flat or falling.</span></figcaption>
+          <div class="legend" id="lg-yoy"></div>
+          <div class="chart" id="c-yoy"></div>
+        </figure>
+        <button class="tbl-toggle" type="button" data-for="c-yoy">View as table</button>
+        <div class="tbl" id="t-c-yoy" hidden></div>
+      </div>
+      <details class="card more">
+        <summary>More: foreign visitor arrivals</summary>
+        <figure>
+          <figcaption><b>Foreign visitor arrivals, millions per month</b> <span class="sub">Tourism demand recovered strongly from late 2022, alongside the shortage.</span></figcaption>
+          <div class="chart" id="c-visitors"></div>
+        </figure>
+      </details>
+    </section>
+
+    <section id="s4">
+      <h2><span class="num">4</span> Forecast</h2>
+      <div class="card pending" id="forecast">
+        <p class="badge"><span aria-hidden="true">⏳</span> Models in progress</p>
+        <p>This section will show the 3- and 12-month forecasts of the retail price, with 95% prediction limits, from four models (ARIMA, VAR, neural network and an ensemble), evaluated on a 12-month holdout and rolling windows.</p>
+        <ul>
+          <li><b>Two tax scenarios</b> from April 2027: food consumption tax cut to 1%, or kept at 8% (a mechanical difference of about 6.5%).</li>
+          <li><b>Contract comparison:</b> enter the price on offer for a 12-month contract to compare it with the forecast path.</li>
+        </ul>
+        <label class="contract">Contract price on offer, ¥ per 5 kg <input type="number" inputmode="numeric" placeholder="e.g. 4,000" disabled></label>
+      </div>
+    </section>
+
+    <section id="s5">
+      <h2><span class="num">5</span> Data &amp; sources</h2>
+      <div class="grid2">
+        <div class="card">
+          <figure>
+            <figcaption><b>Coverage by series</b> <span class="sub">Models use Sep 2010 onward (dashed line), when monthly wholesale data starts.</span></figcaption>
+            <div class="chart" id="c-coverage"></div>
+          </figure>
+        </div>
+        <div class="card">
+          <h3>Data notes</h3>
+          <ul class="flags" id="flags"></ul>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Sources</h3>
+        <div class="tbl" id="sources"></div>
+        <p class="small">Full method, data checks and decisions: <a href="https://github.com/" id="repo-link">project repository</a> (spec.md, sanity_checks.html, R/ scripts).</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap small" id="foot"></footer>
+  <div id="tip" class="tip" role="status" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
