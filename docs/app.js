@@ -345,8 +345,20 @@
   }).observe(document.querySelector("main"));
 
   // ---------- boot ----------
-  fetch("data.json", { cache: "no-cache" })
+  // Every export stamps one build id on index.html, app.js, styles.css and data.json, so code and
+  // data always match. If a cached (stale) page still receives data from a newer build, reload once
+  // under a new URL, which bypasses the cached HTML.
+  const BUILD = document.querySelector('meta[name="build"]')?.content || "dev";
+  fetch("data.json?v=" + BUILD, { cache: "no-cache" })
     .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .then((json) => { D = json; renderStatic(); renderAll(); })
+    .then((json) => {
+      const dataBuild = json.meta && json.meta.build_id;
+      const tried = new URLSearchParams(location.search).get("v");
+      if (BUILD !== "dev" && dataBuild && dataBuild !== BUILD && tried !== dataBuild) {
+        location.replace(location.pathname + "?v=" + encodeURIComponent(dataBuild) + location.hash);
+        return;
+      }
+      D = json; renderStatic(); renderAll();
+    })
     .catch((err) => { $("#meta").textContent = "Could not load data.json (" + err.message + "). Serve this folder over HTTP."; console.error(err); });
 })();

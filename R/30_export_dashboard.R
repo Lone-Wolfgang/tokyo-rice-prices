@@ -6,6 +6,7 @@ suppressPackageStartupMessages({ library(dplyr); library(jsonlite) })
 dir.create("docs", showWarnings = FALSE)
 
 pct <- function(a, b) 100 * (a / b - 1)
+BUILD_ID <- format(Sys.time(), "%Y%m%d%H%M%S")   # ties index.html, app.js, styles.css and data.json together
 BREAK <- as.Date("2024-08-01"); START <- as.Date("2010-09-01")
 
 md  <- read.csv("data/processed/model_data.csv") |> mutate(date = as.Date(date))
@@ -103,7 +104,7 @@ forecast_schema <- list(
                  ase = list(h3 = NULL, h12 = NULL, roll_h3 = NULL, roll_h12 = NULL)))
 
 out <- list(
-  meta = list(title = "Tokyo Rice Prices", as_of = format(last, "%Y-%m"), built = format(Sys.Date()),
+  meta = list(title = "Tokyo Rice Prices", as_of = format(last, "%Y-%m"), built = format(Sys.Date()), build_id = BUILD_ID,
               window_start = format(START, "%Y-%m"), break_date = format(BREAK, "%Y-%m"),
               aug23_rain_mm = aug23_rain, markup_def = "Retail ¥/kg ÷ wholesale ¥/kg (60 kg brown rice → 54 kg milled)"),
   tiles = tiles, monthly = monthly, crop_years = crop_years, ccf = ccf_all, events = events,
@@ -113,3 +114,10 @@ cat(sprintf("docs/data.json: %d months, as of %s | retail ¥%s (%+.1f%% yoy, %+.
             nrow(monthly), format(last, "%Y-%m"), format(tiles$retail$value, big.mark = ","), tiles$retail$yoy_pct, tiles$retail$from_peak_pct,
             format(tiles$wholesale$value, big.mark = ","), tiles$wholesale$mom_pct, tiles$markup$value, tiles$markup$pre_mean,
             tiles$weather$crop_year, tiles$weather$aug_anom, tiles$weather$jja_pct))
+
+# Stamp the build id into index.html so browsers fetch matching code + data (GitHub Pages caches 10 min)
+html <- readLines("docs/index.html", encoding = "UTF-8", warn = FALSE)
+html <- sub('(<meta name="build" content=")[^"]*(")', paste0("\\1", BUILD_ID, "\\2"), html)
+html <- sub('((styles\\.css|app\\.js)\\?v=)[^"]*', paste0("\\1", BUILD_ID), html)
+writeLines(html, "docs/index.html", useBytes = TRUE)
+cat("build id:", BUILD_ID, "\n")
