@@ -204,22 +204,23 @@
         rr.slice().reverse());
     }
 
-    // 2a. indexed retail vs wholesale
+    // 2a. retail vs wholesale in the same unit: ¥ per kg of milled rice, without tax
     {
-      const series = [{ key: "idx_y", label: "Retail", color: C.blue, fmt: (v) => v.toFixed(0) },
-                      { key: "idx_x1", label: "Wholesale", color: C.orange, fmt: (v) => v.toFixed(0) }];
+      const kg = (v) => yen(v) + "/kg";
+      const series = [{ key: "retail_kg", label: "Retail", color: C.blue, fmt: kg },
+                      { key: "wholesale_kg", label: "Wholesale", color: C.orange, fmt: kg }];
       $("#lg-idx").innerHTML = series.map((s) => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join("");
-      const last = rows[rows.length - 1];
       timeChart($("#c-index"), {
         rows, series,
-        y: { type: "log", ticks: [80, 100, 150, 200, 300], tickFormat: (v) => String(v) },
-        marks: [Plot.ruleY([100], { stroke: C.muted, strokeDasharray: "3,3" }),
-                Plot.rect([{ x1: breakD, x2: lastD }], { x1: "x1", x2: "x2", fill: C.shade })],
-        tipExtra: (r) => `<div class="t">Retail ${yen(r.y_ex)} · Wholesale ${yen(r.x1_ex)}/60 kg (ex-tax)</div>`,
+        y: { domain: [0, d3.max(rows, (r) => r.retail_kg) * 1.08], tickFormat: (v) => "¥" + d3.format(",")(v) },
+        marks: [Plot.rect([{ x1: breakD, x2: lastD }], { x1: "x1", x2: "x2", fill: C.shade }),
+                Plot.ruleY([0], { stroke: C.muted })],
+        tipExtra: (r) => `<div class="t">Retail is ${(r.retail_kg / r.wholesale_kg).toFixed(2)}× wholesale</div>`,
       });
       tables["c-index"] = () => tableHTML(
-        [{ key: "date", label: "Month" }, { key: "idx_y", label: "Retail index" }, { key: "idx_x1", label: "Wholesale index" },
-         { key: "x1", label: "Wholesale ¥/60 kg (with tax)", fmt: d3.format(",") }], rows.slice().reverse());
+        [{ key: "date", label: "Month" }, { key: "retail_kg", label: "Retail ¥/kg", fmt: (v) => Math.round(v) },
+         { key: "wholesale_kg", label: "Wholesale ¥/kg", fmt: (v) => Math.round(v) },
+         { key: "x1", label: "Wholesale ¥/60 kg brown (as published, with tax)", fmt: d3.format(",") }], rows.slice().reverse());
     }
 
     // 2b. mark-up

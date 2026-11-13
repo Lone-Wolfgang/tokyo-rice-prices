@@ -291,14 +291,14 @@ The monthly JNTO file starts in **2003**, not 2000. That doesn't matter, because
 ov <- m |> filter(date >= as.Date("2008-09-01")) |>
   mutate(y_ex = y / ifelse(date < as.Date("2014-04-01"), 1.05, 1.08),
          x1_ex = x1 / ifelse(date < as.Date("2014-04-01"), 1.05, 1.08))
-base <- ov |> filter(date >= as.Date("2010-09-01"), date <= as.Date("2011-08-01")) |>
-  summarise(y = mean(y_ex), x1 = mean(x1_ex, na.rm = TRUE))
-ovl <- ov |> transmute(date, `Y retail` = 100 * y_ex / base$y, `X1 wholesale` = 100 * x1_ex / base$x1) |> pivot_longer(-date)
+# same unit for both: ¥ per kg of milled rice (wholesale: 60 kg brown rice -> 54 kg milled at a 0.9 yield)
+ovl <- ov |> transmute(date, `Y retail` = y_ex / 5, `X1 wholesale` = x1_ex / 54) |> pivot_longer(-date)
 p <- ggplot(ovl, aes(date, value, colour = name)) + geom_line(linewidth = 0.6, na.rm = TRUE) +
   scale_colour_manual(values = c(`Y retail` = unname(pal["blue"]), `X1 wholesale` = unname(pal["orange"]))) +
-  scale_y_log10() + labs(x = NULL, y = "Index, 2010 crop year = 100 (log scale)")
-p + labs(title = "Tax-exclusive retail vs wholesale, indexed to a common base",
-         subtitle = "Same log axis, so equal vertical distance = equal % change")
+  scale_y_continuous(labels = function(v) paste0("¥", v), limits = c(0, NA)) +
+  labs(x = NULL, y = "¥ per kg milled rice, without tax")
+p + labs(title = "Retail vs wholesale, in the same unit (¥/kg)",
+         subtitle = "Retail is always above wholesale; the gap is the mark-up (next chart)")
 p + coord_cartesian(xlim = as.Date(c("2023-01-01", "2026-09-30"))) +
   labs(title = "Zoom: 2023–2026", subtitle = "Wholesale jumps in Sep 2024 and Sep 2025; retail climbs over the following months")
 ```

@@ -20,12 +20,11 @@ yoy <- mon |> arrange(date) |>
   mutate(prev = as.Date(sapply(date, function(d) seq(d, by = "-1 year", length.out = 2)[2]), origin = "1970-01-01")) |>
   left_join(mon |> select(prev = date, y_prev = y, x2_prev = x2_all), by = "prev") |>
   transmute(date, yoy_y = pct(y, y_prev), yoy_x2 = pct(x2_all, x2_prev))
-base <- md |> filter(date >= START, date < START + 365) |> summarise(y = mean(y_ex), x1 = mean(x1_ex))
 monthly <- md |> left_join(yoy, by = "date") |>
   mutate(markup = (y_ex / 5) / (x1_ex / 54),              # retail ¥/kg ÷ wholesale ¥/kg milled (0.9 yield)
-         idx_y = 100 * y_ex / base$y, idx_x1 = 100 * x1_ex / base$x1, x4 = exp(lx4)) |>
+         retail_kg = y_ex / 5, wholesale_kg = x1_ex / 54, x4 = exp(lx4)) |>   # ¥/kg milled, without tax
   transmute(date = format(date, "%Y-%m"), y, y_ex = round(y_ex, 1), x1, x1_ex = round(x1_ex, 1),
-            idx_y = round(idx_y, 2), idx_x1 = round(idx_x1, 2), markup = round(markup, 3),
+            retail_kg = round(retail_kg, 1), wholesale_kg = round(wholesale_kg, 1), markup = round(markup, 3),
             yoy_y = round(yoy_y, 1), yoy_x2 = round(yoy_x2, 1), x2 = round(exp(lx2), 1), x4 = round(x4),
             shortage, x1_thin, x1_prelim, x1_volume_t)
 
