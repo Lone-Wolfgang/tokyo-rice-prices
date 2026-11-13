@@ -13,7 +13,8 @@ Forecasting the monthly retail price of a 5 kg bag of Koshihikari rice in Tokyo'
 | `R/0*_pull_*.R` | Download each source into `data/raw/` unchanged |
 | `R/10_parse_join.R` | Parse and join into `data/interim/monthly.csv` |
 | `R/20_prepare_model_data.R` | Model-ready data and evaluation splits (`data/processed/`) |
-| `R/30_export_dashboard.R` | Writes `docs/data.json` for the dashboard |
+| `R/40_placeholder_forecasts.R` | **Placeholder** forecasts (random walk, ARIMA, VAR, ensemble) so the dashboard's forecast section has data; replaced by the final models |
+| `R/30_export_dashboard.R` | Writes `docs/data.json` (includes the forecasts) and stamps the build id into `docs/index.html` |
 | `docs/` | The dashboard: static HTML/CSS/JS reading `data.json` |
 | `data/README.md` | Sources, identifiers, units, download dates |
 
@@ -28,6 +29,7 @@ Rscript R/04_pull_x3_jma.R
 Rscript R/05_pull_x4_jnto.R
 Rscript R/10_parse_join.R
 Rscript R/20_prepare_model_data.R
+Rscript R/40_placeholder_forecasts.R   # placeholder models; run before the export
 Rscript R/30_export_dashboard.R
 Rscript -e 'rmarkdown::render("sanity_checks.Rmd")'
 ```

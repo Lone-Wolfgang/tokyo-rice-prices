@@ -21,11 +21,16 @@ yoy <- mon |> arrange(date) |>
   mutate(prev = as.Date(sapply(date, function(d) seq(d, by = "-1 year", length.out = 2)[2]), origin = "1970-01-01")) |>
   left_join(mon |> select(prev = date, y_prev = y, x2_prev = x2_all), by = "prev") |>
   transmute(date, yoy_y = pct(y, y_prev), yoy_x2 = pct(x2_all, x2_prev))
+# Index base = each series' own pre-2024 mean (Sep 2010 - Jul 2024), so neither line sits above the other
+# just because of the base year. Shows the lead/lag of changes, not price levels.
+idx_base <- md |> filter(date < BREAK) |> summarise(y = mean(y_ex), x1 = mean(x1_ex))
 monthly <- md |> left_join(yoy, by = "date") |>
   mutate(markup = (y_ex / 5) / (x1_ex / 54),              # retail ¥/kg ÷ wholesale ¥/kg milled (0.9 yield)
-         retail_kg = y_ex / 5, wholesale_kg = x1_ex / 54, x4 = exp(lx4)) |>   # ¥/kg milled, without tax
+         retail_kg = y_ex / 5, wholesale_kg = x1_ex / 54, x4 = exp(lx4),   # ¥/kg milled, without tax
+         idx_y = 100 * y_ex / idx_base$y, idx_x1 = 100 * x1_ex / idx_base$x1) |>
   transmute(date = format(date, "%Y-%m"), y, y_ex = round(y_ex, 1), x1, x1_ex = round(x1_ex, 1),
-            retail_kg = round(retail_kg, 1), wholesale_kg = round(wholesale_kg, 1), markup = round(markup, 3),
+            retail_kg = round(retail_kg, 1), wholesale_kg = round(wholesale_kg, 1), idx_y = round(idx_y, 2), idx_x1 = round(idx_x1, 2),
+            markup = round(markup, 3),
             yoy_y = round(yoy_y, 1), yoy_x2 = round(yoy_x2, 1), x2 = round(exp(lx2), 1), x4 = round(x4),
             shortage, x1_thin, x1_prelim, x1_volume_t)
 
@@ -103,12 +108,16 @@ forecast_schema <- list(
                  tax_scenarios = list(cut = "1% food tax from Apr 2027", no_cut = "8% throughout"),
                  ase = list(h3 = NULL, h12 = NULL, roll_h3 = NULL, roll_h12 = NULL)))
 
+# forecasts: placeholder models until the real ones exist (R/40_placeholder_forecasts.R)
+forecast <- if (file.exists("data/processed/forecasts_placeholder.json"))
+  fromJSON("data/processed/forecasts_placeholder.json", simplifyVector = TRUE, simplifyDataFrame = FALSE) else NULL
+
 out <- list(
   meta = list(title = "Tokyo Rice Prices", as_of = format(last, "%Y-%m"), built = format(Sys.Date()), build_id = BUILD_ID,
               window_start = format(START, "%Y-%m"), break_date = format(BREAK, "%Y-%m"),
               aug23_rain_mm = aug23_rain, markup_def = "Retail ¥/kg ÷ wholesale ¥/kg (60 kg brown rice → 54 kg milled)"),
   tiles = tiles, monthly = monthly, crop_years = crop_years, ccf = ccf_all, events = events,
-  coverage = coverage, flags = flags, sources = sources, forecast = NULL, forecast_schema = forecast_schema)
+  coverage = coverage, flags = flags, sources = sources, forecast = forecast, forecast_schema = forecast_schema)
 write_json(out, "docs/data.json", auto_unbox = TRUE, null = "null", na = "null", digits = NA, pretty = FALSE)
 cat(sprintf("docs/data.json: %d months, as of %s | retail ¥%s (%+.1f%% yoy, %+.1f%% from peak) | wholesale ¥%s (%+.1f%% m/m) | markup %.2f (pre mean %.2f) | summer %d: %+.1f °C, %d%% rain\n",
             nrow(monthly), format(last, "%Y-%m"), format(tiles$retail$value, big.mark = ","), tiles$retail$yoy_pct, tiles$retail$from_peak_pct,

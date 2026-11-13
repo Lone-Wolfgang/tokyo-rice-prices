@@ -97,6 +97,12 @@ th { position: sticky; top: 0; background: var(--surface); color: var(--ink-2); 
 .more[open] summary { margin-bottom: 12px; }
 
 .pending { border-style: dashed; background: var(--accent-bg); }
+.banner { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; font-size: 0.86rem;
+          border: 1px solid var(--warning); color: var(--ink); background: color-mix(in srgb, var(--warning) 12%, var(--surface)); }
+.banner b { color: var(--warning-ink); }
+.controls .contract { margin-left: auto; }
+.contract input:invalid { border-color: var(--warning); }
+.best { font-weight: 650; }
 .pending ul { padding-left: 18px; }
 .badge { display: inline-block; font-size: 0.8rem; font-weight: 600; border: 1px solid var(--border); background: var(--surface);
          border-radius: 999px; padding: 2px 10px; margin: 0 0 8px; }

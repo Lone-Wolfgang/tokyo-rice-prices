@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tokyo Rice Prices</title>
   <meta name="description" content="Retail and wholesale rice prices in Tokyo, 2010–2026: what drove the 2024–25 spike, and whether to lock in a 12-month supply contract.">
-  <meta name="build" content="20261113151319">
-  <link rel="stylesheet" href="styles.css?v=20261113151319">
+  <meta name="build" content="20261113152101">
+  <link rel="stylesheet" href="styles.css?v=20261113152101">
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.16/dist/plot.umd.min.js"></script>
 </head>
@@ -51,8 +51,14 @@
       <h2><span class="num">2</span> Wholesale leads retail</h2>
       <p class="intro">The wholesale price that collectors such as JA receive is repriced each September when the new crop arrives. Retail follows over the next months. The gap between the two, the retailer's mark-up, is the best early signal of where shelf prices go next.</p>
       <div class="card">
+        <div class="controls">
+          <div class="seg" role="group" aria-label="Retail vs wholesale view">
+            <button type="button" data-lvl="kg" aria-pressed="true">¥ per kg</button>
+            <button type="button" data-lvl="idx" aria-pressed="false">Index</button>
+          </div>
+        </div>
         <figure>
-          <figcaption><b>Retail vs wholesale, ¥ per kg of milled rice (without tax)</b> <span class="sub">Wholesale converted from ¥ per 60 kg brown rice at a 0.9 milling yield. The gap between the lines is the retailer's mark-up.</span></figcaption>
+          <figcaption><b id="idx-title"></b> <span class="sub" id="idx-sub"></span></figcaption>
           <div class="legend" id="lg-idx"></div>
           <div class="chart" id="c-index"></div>
         </figure>
@@ -127,14 +133,39 @@
 
     <section id="s4">
       <h2><span class="num">4</span> Forecast</h2>
-      <div class="card pending" id="forecast">
-        <p class="badge"><span aria-hidden="true">⏳</span> Models in progress</p>
-        <p>This section will show the 3- and 12-month forecasts of the retail price, with 95% prediction limits, from four models (ARIMA, VAR, neural network and an ensemble), evaluated on a 12-month holdout and rolling windows.</p>
-        <ul>
-          <li><b>Two tax scenarios</b> from April 2027: food consumption tax cut to 1%, or kept at 8% (a mechanical difference of about 6.5%).</li>
-          <li><b>Contract comparison:</b> enter the price on offer for a 12-month contract to compare it with the forecast path.</li>
-        </ul>
-        <label class="contract">Contract price on offer, ¥ per 5 kg <input type="number" inputmode="numeric" placeholder="e.g. 4,000" disabled></label>
+      <p class="intro">Forecast of the retail price of a 5 kg bag over the next 12 months, with 95% prediction limits, and how a fixed contract price compares.</p>
+      <div class="card" id="forecast">
+        <p class="banner"><span aria-hidden="true">⚠</span> <b>Caution: placeholder models.</b> These are quick stand-ins to show the layout. They are not the project's final models, and the numbers are not a forecast to act on.</p>
+        <div class="controls">
+          <div class="seg" role="group" aria-label="Model" id="model-seg"></div>
+          <div class="seg" role="group" aria-label="Tax scenario from April 2027">
+            <button type="button" data-taxs="cut" aria-pressed="true">Tax cut to 1%</button>
+            <button type="button" data-taxs="no_cut" aria-pressed="false">Tax stays 8%</button>
+          </div>
+          <label class="contract">Contract price, ¥ per 5 kg <input id="contract" type="number" inputmode="numeric" min="0" step="10" placeholder="e.g. 4000"></label>
+        </div>
+        <figure>
+          <figcaption><b>Retail price, ¥ per 5 kg bag, with tax</b> <span class="sub" id="fc-sub"></span></figcaption>
+          <div class="legend" id="lg-fc"></div>
+          <div class="chart" id="c-fc"></div>
+          <p class="takeaway" id="fc-summary"></p>
+        </figure>
+        <button class="tbl-toggle" type="button" data-for="c-fc">View as table</button>
+        <div class="tbl" id="t-c-fc" hidden></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <figure>
+            <figcaption><b>Holdout check: forecast vs actual</b> <span class="sub" id="ho-sub"></span></figcaption>
+            <div class="legend" id="lg-ho"></div>
+            <div class="chart" id="c-ho"></div>
+          </figure>
+        </div>
+        <div class="card">
+          <h3>Model comparison</h3>
+          <p class="small" style="margin-top:0">Average squared error in yen (without tax) on the 12-month holdout. Lower is better. Rolling-window errors come with the final models.</p>
+          <div class="tbl" id="ase"></div>
+        </div>
       </div>
     </section>
 
@@ -162,6 +193,6 @@
 
   <footer class="wrap small" id="foot"></footer>
   <div id="tip" class="tip" role="status" hidden></div>
-  <script src="app.js?v=20261113151319"></script>
+  <script src="app.js?v=20261113152101"></script>
 </body>
 </html>

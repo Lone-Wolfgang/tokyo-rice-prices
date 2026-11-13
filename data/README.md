@@ -13,6 +13,7 @@ Rscript R/04_pull_x3_jma.R
 Rscript R/05_pull_x4_jnto.R
 Rscript R/10_parse_join.R     # -> interim/*.csv
 Rscript R/20_prepare_model_data.R  # -> processed/model_data.csv, splits.rds
+Rscript R/40_placeholder_forecasts.R  # -> processed/forecasts_placeholder.json
 Rscript R/30_export_dashboard.R    # -> docs/data.json (dashboard)
 Rscript -e 'rmarkdown::render("sanity_checks.Rmd")'
 ```

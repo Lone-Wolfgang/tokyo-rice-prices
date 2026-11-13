@@ -7,7 +7,7 @@
   const yen = (v) => "¥" + d3.format(",")(Math.round(v));
   const pct = (v, d = 1) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(d) + "%";
   const tok = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const state = { range: "all", tax: "incl", ccf: "pre" };
+  const state = { range: "all", tax: "incl", ccf: "pre", lvl: "kg", model: "Ensemble", taxs: "cut" };
   let D = null;
 
   // ---------- theme ----------
@@ -59,7 +59,7 @@
       marks: [
         gridY(),
         ...marks,
-        ...series.map((s) => Plot.lineY(rows, { x: "d", y: s.key, stroke: s.color, strokeWidth: 2, curve: "linear" })),
+        ...series.map((s) => Plot.lineY(rows, { x: "d", y: s.key, stroke: s.color, strokeWidth: 2, curve: "linear", strokeDasharray: s.dash })),
       ],
     });
     el.replaceChildren(plot);
@@ -132,7 +132,8 @@
       renderAll();
     }));
   }
-  wireSeg("range", "range"); wireSeg("tax", "tax"); wireSeg("ccf", "ccf");
+  wireSeg("range", "range"); wireSeg("tax", "tax"); wireSeg("ccf", "ccf"); wireSeg("lvl", "lvl"); wireSeg("taxs", "taxs");
+  $("#contract").addEventListener("input", () => renderAll());
 
   // ---------- static content ----------
   function renderStatic() {
@@ -158,6 +159,11 @@
       `<li><span class="dot">${i + 1}</span><span><b>${fmtYM(parseYM(e.date))} · ${e.label}.</b> ${e.detail}${
         e.source.startsWith("http") ? ` <a href="${e.source}" target="_blank" rel="noopener">Source</a>` : ` (${e.source})`}</span></li>`).join("");
 
+    if (D.forecast) {
+      $("#model-seg").innerHTML = D.forecast.models.map((m) =>
+        `<button type="button" data-model="${m.model}" aria-pressed="${m.model === state.model}">${m.model}</button>`).join("");
+      wireSeg("model", "model");
+    }
     $("#markup-sub").textContent = `Retail ¥/kg ÷ wholesale ¥/kg milled. Dotted: pre-2024 average (${t.markup.pre_mean.toFixed(2)}×).`;
 
     const icons = { warning: ["⚠", "Caution"], info: ["ℹ", "Note"] };
@@ -204,23 +210,34 @@
         rr.slice().reverse());
     }
 
-    // 2a. retail vs wholesale in the same unit: ¥ per kg of milled rice, without tax
+    // 2a. retail vs wholesale: price levels (¥/kg) or index (each series' pre-2024 mean = 100)
     {
-      const kg = (v) => yen(v) + "/kg";
-      const series = [{ key: "retail_kg", label: "Retail", color: C.blue, fmt: kg },
-                      { key: "wholesale_kg", label: "Wholesale", color: C.orange, fmt: kg }];
+      const isIdx = state.lvl === "idx";
+      const kg = (v) => yen(v) + "/kg", ix = (v) => v.toFixed(0);
+      const series = isIdx
+        ? [{ key: "idx_y", label: "Retail", color: C.blue, fmt: ix }, { key: "idx_x1", label: "Wholesale", color: C.orange, fmt: ix }]
+        : [{ key: "retail_kg", label: "Retail", color: C.blue, fmt: kg }, { key: "wholesale_kg", label: "Wholesale", color: C.orange, fmt: kg }];
+      $("#idx-title").textContent = isIdx ? "Retail vs wholesale, index (each series' own Sep 2010 – Jul 2024 average = 100, log scale)"
+                                          : "Retail vs wholesale, ¥ per kg of milled rice (without tax)";
+      $("#idx-sub").textContent = isIdx
+        ? "Compares changes, not price levels: retail always costs more (switch to ¥ per kg). Equal vertical distance = equal % change, so you can see wholesale move first."
+        : "Wholesale converted from ¥ per 60 kg brown rice at a 0.9 milling yield. The gap between the lines is the retailer's mark-up.";
       $("#lg-idx").innerHTML = series.map((s) => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join("");
       timeChart($("#c-index"), {
         rows, series,
-        y: { domain: [0, d3.max(rows, (r) => r.retail_kg) * 1.08], tickFormat: (v) => "¥" + d3.format(",")(v) },
+        y: isIdx ? (() => { const lo = d3.min(rows, (r) => Math.min(r.idx_y, r.idx_x1)), hi = d3.max(rows, (r) => Math.max(r.idx_y, r.idx_x1));
+                   return { type: "log", domain: [lo * 0.97, hi * 1.03], ticks: [60, 80, 100, 150, 200, 300].filter((t) => t >= lo * 0.97 && t <= hi * 1.03), tickFormat: (v) => String(v) }; })()
+                 : { domain: [0, d3.max(rows, (r) => r.retail_kg) * 1.08], tickFormat: (v) => "¥" + d3.format(",")(v) },
         marks: [Plot.rect([{ x1: breakD, x2: lastD }], { x1: "x1", x2: "x2", fill: C.shade }),
-                Plot.ruleY([0], { stroke: C.muted })],
-        tipExtra: (r) => `<div class="t">Retail is ${(r.retail_kg / r.wholesale_kg).toFixed(2)}× wholesale</div>`,
+                isIdx ? Plot.ruleY([100], { stroke: C.muted, strokeDasharray: "3,3" }) : Plot.ruleY([0], { stroke: C.muted })],
+        tipExtra: (r) => `<div class="t">${isIdx ? `Prices: retail ${kg(r.retail_kg)} · wholesale ${kg(r.wholesale_kg)}`
+                                                 : `Retail is ${(r.retail_kg / r.wholesale_kg).toFixed(2)}× wholesale`}</div>`,
       });
       tables["c-index"] = () => tableHTML(
         [{ key: "date", label: "Month" }, { key: "retail_kg", label: "Retail ¥/kg", fmt: (v) => Math.round(v) },
          { key: "wholesale_kg", label: "Wholesale ¥/kg", fmt: (v) => Math.round(v) },
-         { key: "x1", label: "Wholesale ¥/60 kg brown (as published, with tax)", fmt: d3.format(",") }], rows.slice().reverse());
+         { key: "idx_y", label: "Retail index", fmt: (v) => v.toFixed(1) }, { key: "idx_x1", label: "Wholesale index", fmt: (v) => v.toFixed(1) },
+         { key: "x1", label: "Wholesale ¥/60 kg (as published)", fmt: d3.format(",") }], rows.slice().reverse());
     }
 
     // 2b. mark-up
@@ -317,6 +334,9 @@
       y: { domain: [0, null], tickFormat: (v) => v + "m" }, height: 220,
     });
 
+    // 4. forecast (placeholder models)
+    if (D.forecast) renderForecast(C, rows);
+
     // 5. coverage
     {
       const el = $("#c-coverage"), opts = base(el, 230);
@@ -335,6 +355,74 @@
     }
   }
   $("#c-visitors").closest("details").addEventListener("toggle", renderAll);
+
+  // ---------- forecast ----------
+  function renderForecast(C, rows) {
+    const F = D.forecast, M = F.models.find((m) => m.model === state.model) || F.models[F.models.length - 1];
+    const taxOf = Object.fromEntries(F.tax.dates.map((d, i) => [d, F.tax[state.taxs][i]]));
+    const hist = rows.filter((r) => r.d >= Date.UTC(2023, 9, 1));
+    const lastH = hist[hist.length - 1];
+    const fc = M.path.map((p) => { const t = taxOf[p.date];
+      return { d: parseYM(p.date), date: p.date, f: p.mean_ex * t, lo: p.lo95_ex * t, hi: p.hi95_ex * t, tax: t }; });
+    const merged = [...hist.map((r) => ({ d: r.d, date: r.date, y: r.y })), ...fc];
+    const bridge = merged.find((r) => r.date === lastH.date); bridge.f = lastH.y; bridge.lo = lastH.y; bridge.hi = lastH.y;
+    const contract = +$("#contract").value || null;
+    const taxD = parseYM("2027-04");
+    const series = [{ key: "y", label: "Actual", color: C.blue, fmt: yen },
+                    { key: "f", label: `Forecast (${M.model})`, color: C.blue, fmt: yen, dash: "5,4" }];
+    $("#lg-fc").innerHTML = `<span><i style="background:${C.blue}"></i>Actual</span>` +
+      `<span><i style="background:repeating-linear-gradient(90deg,${C.blue} 0 5px,transparent 5px 9px)"></i>Forecast (${M.model})</span>` +
+      `<span><i style="height:8px;background:${C.blue};opacity:.18"></i>95% limits</span>` +
+      (contract ? `<span><i style="background:${C.ink}"></i>Contract price</span>` : "");
+    $("#fc-sub").textContent = `${M.spec}. Forecast from ${fmtYM(parseYM(F.origin))}. ` +
+      (state.taxs === "cut" ? "Tax: 8% to Mar 2027, then 1% (food tax cut passes)." : "Tax: 8% throughout (no cut).");
+    const band = merged.filter((r) => r.lo != null);
+    timeChart($("#c-fc"), {
+      rows: merged, series, height: 300,
+      y: { domain: [0, Math.max(d3.max(merged, (r) => r.hi ?? r.y), contract || 0) * 1.08], tickFormat: (v) => "¥" + d3.format(",")(v) },
+      marks: [
+        Plot.areaY(band, { x: "d", y1: "lo", y2: "hi", fill: C.blue, fillOpacity: 0.16 }),
+        Plot.ruleX([parseYM(F.origin)], { stroke: C.muted, strokeDasharray: "3,3" }),
+        Plot.text([parseYM(F.origin)], { x: (d) => d, frameAnchor: "top", text: () => "Forecast →", textAnchor: "start", dx: 4, dy: 4, fill: C.ink2 }),
+        ...(state.taxs === "cut" ? [Plot.ruleX([taxD], { stroke: C.muted, strokeDasharray: "1,3" }),
+          Plot.text([taxD], { x: (d) => d, frameAnchor: "bottom", text: () => "Tax 8% → 1%", textAnchor: "start", dx: 4, dy: -6, fill: C.ink2 })] : []),
+        ...(contract ? [Plot.ruleY([contract], { stroke: C.ink, strokeWidth: 1.5 }),
+          Plot.text([contract], { y: (d) => d, frameAnchor: "left", text: () => `Contract ${yen(contract)}`, textAnchor: "start", dx: 6, dy: -7, fill: C.ink })] : []),
+        Plot.ruleY([0], { stroke: C.muted }),
+      ],
+      tipExtra: (r) => r.lo != null && r.date !== lastH.date ? `<div class="t">95% limits ${yen(r.lo)} – ${yen(r.hi)} · tax ${Math.round((r.tax - 1) * 100)}%</div>` : "",
+    });
+    const at = (i) => fc[i], avg = d3.mean(fc, (r) => r.f);
+    let txt = `<b>${M.model} (placeholder):</b> ${yen(at(2).f)} in ${fmtYM(at(2).d)} (3 months) and ${yen(at(11).f)} in ${fmtYM(at(11).d)} ` +
+      `(12 months; 95% limits ${yen(at(11).lo)}–${yen(at(11).hi)}). Average over the next 12 months: <b>${yen(avg)}</b>.`;
+    if (contract) {
+      const diff = (contract / avg - 1) * 100;
+      txt += ` A contract at ${yen(contract)} is <b>${Math.abs(diff).toFixed(1)}% ${diff >= 0 ? "above" : "below"}</b> that average` +
+        `, so on these placeholder numbers ${diff >= 0 ? "buying at spot would cost less" : "the contract would cost less"}.`;
+    }
+    $("#fc-summary").innerHTML = txt;
+    tables["c-fc"] = () => tableHTML([{ key: "date", label: "Month" }, { key: "f", label: "Forecast (¥, with tax)", fmt: (v) => d3.format(",")(Math.round(v)) },
+      { key: "lo", label: "Lower 95%", fmt: (v) => d3.format(",")(Math.round(v)) }, { key: "hi", label: "Upper 95%", fmt: (v) => d3.format(",")(Math.round(v)) },
+      { key: "tax", label: "Tax", fmt: (v) => Math.round((v - 1) * 100) + "%" }], fc);
+
+    // holdout: actual vs selected model, without tax
+    const ho = M.holdout_path.map((p, i) => ({ d: parseYM(p.date), date: p.date, a: F.holdout.actual_ex[i], f: p.mean_ex }));
+    $("#ho-sub").textContent = `Fitted through ${fmtYM(parseYM(rows[rows.findIndex((r) => r.date === F.holdout.start) - 1].date))}, ` +
+      `then forecast ${fmtYM(parseYM(F.holdout.start))} – ${fmtYM(parseYM(F.holdout.end))}. ¥ per 5 kg, without tax.`;
+    $("#lg-ho").innerHTML = `<span><i style="background:${C.blue}"></i>Actual</span>` +
+      `<span><i style="background:repeating-linear-gradient(90deg,${C.orange} 0 5px,transparent 5px 9px)"></i>${M.model} forecast</span>`;
+    timeChart($("#c-ho"), {
+      rows: ho, height: 240,
+      series: [{ key: "a", label: "Actual", color: C.blue, fmt: yen }, { key: "f", label: `${M.model}`, color: C.orange, fmt: yen, dash: "5,4" }],
+      y: { domain: [0, d3.max(ho, (r) => Math.max(r.a, r.f)) * 1.1], tickFormat: (v) => "¥" + d3.format(",")(v) },
+      marks: [Plot.ruleY([0], { stroke: C.muted })],
+    });
+    const best = { h3: d3.min(F.models, (m) => m.ase.h3), h12: d3.min(F.models, (m) => m.ase.h12) };
+    const cell = (k) => (v) => `<span class="${v === best[k] ? "best" : ""}">${d3.format(",")(v)}${v === best[k] ? " ✓" : ""}</span>`;
+    $("#ase").innerHTML = tableHTML([{ key: "model", label: "Model" }, { key: "h3", label: "ASE, 3 months", fmt: cell("h3") },
+      { key: "h12", label: "ASE, 12 months", fmt: cell("h12") }, { key: "roll", label: "Rolling" }],
+      F.models.map((m) => ({ model: m.model, h3: m.ase.h3, h12: m.ase.h12, roll: "pending" })));
+  }
 
   // ---------- resize ----------
   let lastW = 0, timer;
