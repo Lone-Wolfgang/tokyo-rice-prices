@@ -2,7 +2,7 @@
 
 Forecasting the monthly retail price of a 5 kg bag of Koshihikari rice in Tokyo's 23 wards, 3 and 12 months ahead, so a Tokyo restaurant group can decide whether to lock in a 12-month supply contract or keep buying at spot.
 
-**Dashboard:** `docs/` (published with GitHub Pages).
+**Dashboard:** https://lone-wolfgang.github.io/tokyo-rice-prices/ (source in `docs/`).
 
 ## Contents
 
